@@ -28,12 +28,16 @@
 */
 
 #define _GNU_SOURCE
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <time.h>
 
 #include "vireo.h"
 
 #define UNUSED __attribute__((unused))
+
+#define TIMERSIG SIGRTMIN
 
 // Environment structure, containing a status and a jump buffer.
 typedef struct Env {
@@ -61,6 +65,13 @@ void umain(void); /* provided by user */
 
 /* Define a "successor context" for the purpose of calling env_exit */
 static ucontext_t exiter = {0};
+
+/* Preemption timer */
+timer_t timer;
+const struct itimerspec ts = {
+	{0, 0},
+	{0, 100000000},
+};
 
 static void
 make_stack(ucontext_t *ucp)
@@ -110,6 +121,8 @@ vireo_schedule(void)
 		candidate = (curenv + attempts + 1) % NENV;
 		if (envs[candidate].status == ENV_RUNNABLE) {
 			curenv = candidate;
+			/* Request delivery of TIMERSIG after 10 ms */
+			timer_settime(timer, 0, &ts, NULL);
 			setcontext(&envs[curenv].state);
 		}
 		attempts++;
@@ -169,6 +182,30 @@ vireo_send(int toenv, int val)
 }
 
 static void
+preempt(int signum UNUSED, siginfo_t *si UNUSED, void *context UNUSED)
+{
+	vireo_yield();
+}
+
+static void
+enable_preemption(void)
+{
+	struct sigaction act = {
+		.sa_sigaction = preempt,
+		.sa_flags = SA_SIGINFO,
+	};
+	struct sigevent sigev = {
+		.sigev_notify = SIGEV_SIGNAL,
+		.sigev_signo = TIMERSIG,
+		.sigev_value.sival_int = 0,
+	};
+
+	sigemptyset(&act.sa_mask);
+	sigaction(TIMERSIG, &act, NULL);
+	timer_create(CLOCK_PROCESS_CPUTIME_ID, &sigev, &timer);
+}
+
+static void
 initialize_threads(vireo_entry new_main)
 {
 	curenv = 0;
@@ -184,6 +221,7 @@ initialize_threads(vireo_entry new_main)
 int
 main(int argc UNUSED, char* argv[] UNUSED)
 {
+	enable_preemption();
 	initialize_threads(umain);
 	return 0;
 }
