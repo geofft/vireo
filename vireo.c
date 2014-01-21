@@ -40,6 +40,8 @@ typedef struct Env {
 	int status;
 	ucontext_t state;
 	int state_reentered;
+	int ipc_sender;
+	int ipc_value;
 } Env;
 
 // Increase NENV to get more greenlets
@@ -48,6 +50,7 @@ typedef struct Env {
 // Status codes for the Env
 #define ENV_UNUSED    0
 #define ENV_RUNNABLE  1
+#define ENV_WAITING   2
 
 #define ENV_STACK_SIZE  16384
 
@@ -143,6 +146,26 @@ int
 vireo_getid(void)
 {
 	return curenv;
+}
+
+int
+vireo_recv(int *who)
+{
+	envs[curenv].status = ENV_WAITING;
+	vireo_yield();
+	if (who)
+		*who = envs[curenv].ipc_sender;
+	return envs[curenv].ipc_value;
+}
+
+void
+vireo_send(int toenv, int val)
+{
+	while (envs[toenv].status != ENV_WAITING)
+		vireo_yield();
+	envs[toenv].ipc_sender = curenv;
+	envs[toenv].ipc_value = val;
+	envs[toenv].status = ENV_RUNNABLE;
 }
 
 static void

@@ -27,4 +27,10 @@ void vireo_destroy(int id);
 // Get this environment's ID
 int vireo_getid(void);
 
+// Receive a value from another green thread
+int vireo_recv(int *who);
+
+// Send a value to another green thread
+void vireo_send(int dest, int val);
+
 #endif
